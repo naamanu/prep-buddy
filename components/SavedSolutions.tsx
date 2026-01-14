@@ -1,7 +1,9 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { QUESTIONS } from '@/constants';
-import { getAllProgress, QuestionProgress } from '@/services';
-import { CheckCircle, Clock, ArrowRight, Code2, Calendar, Trophy, Loader2 } from 'lucide-react';
+import { getAllProgress, type QuestionProgress } from '@/services';
+import { logger } from '@/utils/logger';
+import { CheckCircle, ArrowRight, Code2, Calendar, Trophy } from 'lucide-react';
+import LoadingSpinner from './LoadingSpinner';
 
 interface SavedSolutionsProps {
   onSelectQuestion: (questionId: string) => void;
@@ -18,7 +20,7 @@ const SavedSolutions: React.FC<SavedSolutionsProps> = ({ onSelectQuestion, onNav
         const p = await getAllProgress();
         setProgress(p);
       } catch (e) {
-        console.error(e);
+        logger.error(e);
       } finally {
         setLoading(false);
       }
@@ -57,10 +59,7 @@ const SavedSolutions: React.FC<SavedSolutionsProps> = ({ onSelectQuestion, onNav
       <main className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-4xl mx-auto">
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-20">
-              <Loader2 className="animate-spin w-8 h-8 mb-4" />
-              <p className="font-mono text-sm">RETRIEVING ARCHIVES...</p>
-            </div>
+            <LoadingSpinner message="RETRIEVING ARCHIVES..." size="md" />
           ) : solvedQuestions.length === 0 ? (
             <div className="text-center py-20 border-2 border-black bg-white shadow-retro">
               <div className="w-16 h-16 bg-gray-200 border-2 border-black flex items-center justify-center mx-auto mb-4 text-gray-500">

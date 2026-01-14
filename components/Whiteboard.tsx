@@ -3,6 +3,7 @@ import React, { useRef, useState, useEffect, useLayoutEffect } from 'react';
 import { MousePointer2, Square, Database, ArrowRight, Type, Pen, Trash2, Eraser } from 'lucide-react';
 
 import type { DiagramElement } from '@/types';
+import { logger } from '@/utils/logger';
 
 interface WhiteboardProps {
   initialData?: string;
@@ -24,17 +25,18 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ initialData, onSave }) => {
   // Refs for tracking state without triggering re-renders in effects
   const dprRef = useRef(1);
 
-  // Load initial data
+  // Load initial data - sync elements state with prop
   useEffect(() => {
     if (initialData) {
       try {
         const parsed = JSON.parse(initialData);
         // Only update if different to avoid loop
         if (JSON.stringify(parsed) !== JSON.stringify(elements)) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing with prop is valid
             setElements(parsed);
         }
       } catch (e) {
-        console.error("Failed to parse diagram data", e);
+        logger.error("Failed to parse diagram data", e);
       }
     }
   }, [initialData]);
@@ -78,36 +80,11 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ initialData, onSave }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Drawing Loop
-  useLayoutEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Use stored DPR for grid calculations, but context is already scaled
-    // We just need to clear the logical area
-    const width = canvas.width / dprRef.current;
-    const height = canvas.height / dprRef.current;
-
-    // Clear canvas (using logical coordinates because of scale)
-    ctx.clearRect(0, 0, width, height);
-
-    // Draw grid
-    drawGrid(ctx, width, height);
-
-    // Draw elements
-    elements.forEach(el => {
-      drawElement(ctx, el, el.id === selectedId);
-    });
-
-  }, [elements, selectedId]);
-
   const drawGrid = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
     ctx.strokeStyle = '#f0f0f0';
     ctx.lineWidth = 1;
     const size = 20;
-    
+
     ctx.beginPath();
     for (let x = 0; x <= w; x += size) {
       ctx.moveTo(x, 0);
@@ -139,12 +116,12 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ initialData, onSave }) => {
         ctx.fill();
         ctx.stroke();
         break;
-      
-      case 'database':
+
+      case 'database': {
         const w = el.width!;
         const h = el.height!;
         const h4 = h / 6;
-        
+
         // Sides
         ctx.moveTo(el.x, el.y + h4);
         ctx.lineTo(el.x, el.y + h - h4);
@@ -152,26 +129,27 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ initialData, onSave }) => {
         ctx.bezierCurveTo(el.x, el.y + h, el.x + w, el.y + h, el.x + w, el.y + h - h4);
         ctx.lineTo(el.x + w, el.y + h4);
         ctx.stroke();
-        
+
         // Top full oval
         ctx.beginPath();
         ctx.ellipse(el.x + w/2, el.y + h4, w/2, h4, 0, 0, 2 * Math.PI);
         ctx.fill();
         ctx.stroke();
-        
+
         // Middle line (decoration for cylinder)
         ctx.beginPath();
         ctx.moveTo(el.x, el.y + h4);
         ctx.ellipse(el.x + w/2, el.y + h4, w/2, h4, 0, 0, Math.PI);
         ctx.stroke();
         break;
+      }
 
-      case 'arrow':
+      case 'arrow': {
         const headlen = 10;
         const angle = Math.atan2(el.height!, el.width!);
         const endX = el.x + el.width!;
         const endY = el.y + el.height!;
-        
+
         ctx.moveTo(el.x, el.y);
         ctx.lineTo(endX, endY);
         ctx.stroke();
@@ -184,26 +162,28 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ initialData, onSave }) => {
         ctx.lineTo(endX - headlen * Math.cos(angle + Math.PI / 6), endY - headlen * Math.sin(angle + Math.PI / 6));
         ctx.stroke();
         break;
+      }
 
-      case 'text':
+      case 'text': {
         ctx.font = 'bold 14px "Fira Code", monospace';
         ctx.fillStyle = '#000000';
         ctx.textBaseline = 'top';
         ctx.setLineDash([]); // Text doesn't need dash
-        
+
         // If editing, don't draw the text on canvas (input overlay handles it)
         if (textInput && textInput.id === el.id) return;
-        
+
         const lines = (el.text || 'Text').split('\n');
         lines.forEach((line, i) => {
             ctx.fillText(line, el.x, el.y + (i * 18));
         });
-        
+
         if (isSelected) {
            const metrics = ctx.measureText(lines.reduce((a, b) => a.length > b.length ? a : b, ''));
            ctx.strokeRect(el.x - 4, el.y - 4, metrics.width + 8, (lines.length * 18) + 8);
         }
         break;
+      }
 
       case 'pencil':
         if (!el.points || el.points.length < 2) return;
@@ -215,6 +195,31 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ initialData, onSave }) => {
         break;
     }
   };
+
+  // Drawing Loop
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Use stored DPR for grid calculations, but context is already scaled
+    // We just need to clear the logical area
+    const width = canvas.width / dprRef.current;
+    const height = canvas.height / dprRef.current;
+
+    // Clear canvas (using logical coordinates because of scale)
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw grid
+    drawGrid(ctx, width, height);
+
+    // Draw elements
+    elements.forEach(el => {
+      drawElement(ctx, el, el.id === selectedId);
+    });
+
+  }, [elements, selectedId, textInput]);
 
   const getMousePos = (e: React.MouseEvent) => {
     const canvas = canvasRef.current;
