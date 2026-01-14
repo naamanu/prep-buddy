@@ -1,4 +1,9 @@
-import { StorageServiceConfig, QuestionProgress } from "./types";
+import { type StorageServiceConfig, type QuestionProgress } from "./types";
+import { logger } from '@/utils/logger';
+
+// Re-export interview session storage modules
+export * from './indexedDB';
+export * from './sessionLock';
 
 
 /**
@@ -22,7 +27,7 @@ export class StorageService {
             const allData = JSON.parse(raw);
             return allData[questionId] || { isSolved: false, grade: 0 };
         } catch (e) {
-            console.error("Failed to load progress", e);
+            logger.error("Failed to load progress", e);
             return { isSolved: false, grade: 0 };
         }
     }
@@ -36,7 +41,7 @@ export class StorageService {
             if (!raw) return {};
             return JSON.parse(raw);
         } catch (e) {
-            console.error("Failed to load all progress", e);
+            logger.error("Failed to load all progress", e);
             return {};
         }
     }
@@ -61,7 +66,7 @@ export class StorageService {
 
             localStorage.setItem(this.storageKey, JSON.stringify(allData));
         } catch (e) {
-            console.error("Failed to save progress", e);
+            logger.error("Failed to save progress", e);
         }
     }
 
@@ -72,7 +77,7 @@ export class StorageService {
         try {
             localStorage.removeItem(this.storageKey);
         } catch (e) {
-            console.error("Failed to clear progress", e);
+            logger.error("Failed to clear progress", e);
         }
     }
 }

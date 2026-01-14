@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { SYSTEM_DESIGN_QUESTIONS } from '@/systemDesignData';
+import { logger } from '@/utils/logger';
 import FlipCard from './FlipCard';
 import LiveInterviewPanel from './LiveInterviewPanel';
 import Modal from './Modal';
@@ -53,7 +54,7 @@ const SystemDesignApp: React.FC<SystemDesignAppProps> = ({ onNavigateHome }) => 
         setChatHistory(savedData.chatHistory || []);
         setDiagramData(savedData.diagramData || '');
       } catch (e) {
-        console.error("Failed to load progress", e);
+        logger.error("Failed to load progress", e);
       }
     };
     loadData();
@@ -121,7 +122,7 @@ const SystemDesignApp: React.FC<SystemDesignAppProps> = ({ onNavigateHome }) => 
       const finalHistory = [...updatedHistory, { role: 'model', text: response } as ChatMessage];
       setChatHistory(finalHistory);
       await saveStoredProgress(currentQuestion.id, { chatHistory: finalHistory });
-    } catch (e) {
+    } catch {
       setChatHistory(prev => [...prev, { role: 'model', text: "Sorry, I encountered an architectural error." }]);
     } finally {
       setChatLoading(false);

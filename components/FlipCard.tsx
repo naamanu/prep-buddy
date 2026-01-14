@@ -1,7 +1,7 @@
 
 import React from 'react';
 import type { Question } from '@/types';
-import { Eye, ArrowLeft, Tag, Terminal, Loader2 } from 'lucide-react';
+import { Eye, ArrowLeft, Terminal, Loader2 } from 'lucide-react';
 
 interface FlipCardProps {
   question: Question;

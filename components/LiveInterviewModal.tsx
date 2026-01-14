@@ -1,9 +1,11 @@
 
-import React, { useEffect, useRef, useState } from 'react';
-import { X, Mic, MicOff, Loader2, Volume2, Radio } from 'lucide-react';
-import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { X, Mic, MicOff, Loader2, Radio } from 'lucide-react';
+import { GoogleGenAI, type LiveServerMessage, Modality } from '@google/genai';
 import type { Question } from '@/types';
 import { base64ToUint8Array, arrayBufferToBase64, float32ToInt16, decodeAudioData } from '@/services/audioUtils';
+import { logger } from '@/utils/logger';
+import { GEMINI_LIVE_AUDIO_MODEL } from '@/config/models';
 
 interface LiveInterviewModalProps {
     isOpen: boolean;
@@ -28,16 +30,41 @@ const LiveInterviewModal: React.FC<LiveInterviewModalProps> = ({ isOpen, onClose
     const nextStartTimeRef = useRef<number>(0);
     const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
-    useEffect(() => {
-        if (isOpen) {
-            startSession();
-        } else {
-            stopSession();
-        }
-        return () => stopSession();
-    }, [isOpen]);
+    // Stable random values for visualizer bars (lazy init runs once)
+    const [barRandomFactors] = useState(() =>
+        [...Array(5)].map(() => Math.random() + 0.5)
+    );
 
-    const startSession = async () => {
+    const stopSession = useCallback(() => {
+        // Cleanup Audio Contexts & Stream
+        if (processorRef.current) {
+            processorRef.current.disconnect();
+            processorRef.current = null;
+        }
+        if (sourceRef.current) {
+            sourceRef.current.disconnect();
+            sourceRef.current = null;
+        }
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        }
+        if (inputContextRef.current) {
+            inputContextRef.current.close();
+            inputContextRef.current = null;
+        }
+        if (outputContextRef.current) {
+            outputContextRef.current.close();
+            outputContextRef.current = null;
+        }
+
+        setIsConnected(false);
+        setVolumeLevel(0);
+        setAiSpeaking(false);
+        nextStartTimeRef.current = 0;
+    }, []);
+
+    const startSession = useCallback(async () => {
         try {
             setError(null);
 
@@ -55,7 +82,7 @@ const LiveInterviewModal: React.FC<LiveInterviewModalProps> = ({ isOpen, onClose
             const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
             const sessionPromise = ai.live.connect({
-                model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+                model: GEMINI_LIVE_AUDIO_MODEL,
                 config: {
                     responseModalities: [Modality.AUDIO],
                     systemInstruction: `
@@ -83,7 +110,7 @@ const LiveInterviewModal: React.FC<LiveInterviewModalProps> = ({ isOpen, onClose
                 },
                 callbacks: {
                     onopen: () => {
-                        console.log('Gemini Live Session Connected');
+                        logger.log('Gemini Live Session Connected');
                         setIsConnected(true);
 
                         // 4. Setup Audio Input Processing (Stream to Gemini)
@@ -162,11 +189,11 @@ const LiveInterviewModal: React.FC<LiveInterviewModalProps> = ({ isOpen, onClose
                         }
                     },
                     onclose: () => {
-                        console.log('Session Closed');
+                        logger.log('Session Closed');
                         setIsConnected(false);
                     },
                     onerror: (err) => {
-                        console.error('Gemini Live Error', err);
+                        logger.error('Gemini Live Error', err);
                         setError("Connection error. Please try again.");
                     }
                 }
@@ -175,43 +202,20 @@ const LiveInterviewModal: React.FC<LiveInterviewModalProps> = ({ isOpen, onClose
             sessionRef.current = sessionPromise;
 
         } catch (err: any) {
-            console.error("Failed to start interview session:", err);
+            logger.error("Failed to start interview session:", err);
             setError(err.message || "Failed to access microphone or API.");
         }
-    };
+    }, [question, isMicOn]);
 
-    const stopSession = () => {
-        // Cleanup Audio Contexts & Stream
-        if (processorRef.current) {
-            processorRef.current.disconnect();
-            processorRef.current = null;
+    useEffect(() => {
+        if (isOpen) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- connecting to external service on prop change
+            startSession();
+        } else {
+            stopSession();
         }
-        if (sourceRef.current) {
-            sourceRef.current.disconnect();
-            sourceRef.current = null;
-        }
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-        }
-        if (inputContextRef.current) {
-            inputContextRef.current.close();
-            inputContextRef.current = null;
-        }
-        if (outputContextRef.current) {
-            outputContextRef.current.close();
-            outputContextRef.current = null;
-        }
-
-        // Close Gemini Session - currently no direct .close() on the promise, 
-        // relying on cleanup of stream triggering server disconnect or garbage collection for now
-        // or simply unmounting.
-
-        setIsConnected(false);
-        setVolumeLevel(0);
-        setAiSpeaking(false);
-        nextStartTimeRef.current = 0;
-    };
+        return () => stopSession();
+    }, [isOpen, startSession, stopSession]);
 
     if (!isOpen) return null;
 
@@ -239,8 +243,8 @@ const LiveInterviewModal: React.FC<LiveInterviewModalProps> = ({ isOpen, onClose
                     )}
 
                     {error && (
-                        <div className="text-red-400 text-center px-6 text-sm">
-                            <p className="mb-2">⚠️ {error}</p>
+                        <div className="text-red-400 text-center px-6 text-sm w-full">
+                            <p className="mb-2 break-all">⚠️ {error}</p>
                             <button onClick={startSession} className="px-4 py-2 bg-gray-800 rounded text-white hover:bg-gray-700 mt-2">Retry</button>
                         </div>
                     )}
@@ -291,12 +295,12 @@ const LiveInterviewModal: React.FC<LiveInterviewModalProps> = ({ isOpen, onClose
                     {/* Simple Input Visualizer Bar */}
                     {isConnected && isMicOn && (
                         <div className="mt-6 flex justify-center gap-1 h-4 items-end">
-                            {[...Array(5)].map((_, i) => (
+                            {barRandomFactors.map((factor, i) => (
                                 <div
                                     key={i}
                                     className="w-1 bg-green-500 rounded-full transition-all duration-75"
                                     style={{
-                                        height: `${Math.max(4, Math.min(100, volumeLevel * 100 * (Math.random() + 0.5)))}%`,
+                                        height: `${Math.max(4, Math.min(100, volumeLevel * 100 * factor))}%`,
                                         opacity: volumeLevel > 0.01 ? 1 : 0.3
                                     }}
                                 ></div>
