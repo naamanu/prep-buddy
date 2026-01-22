@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { QUESTIONS } from '@/constants';
+import { logger } from '@/utils/logger';
 import { DATA_STRUCTURES, ALGORITHMS, INTERVIEW_CONCEPTS } from '@/referenceData';
 import FlipCard from './FlipCard';
 import Editor from './Editor';
@@ -13,7 +14,8 @@ import SolutionComparison from './SolutionComparison';
 import { analyzeSolution, getProblemExplanation, chatWithTutor, generateOfficialSolution } from '@/services';
 import type { AnalysisResult, Question, ChatMessage } from '@/types';
 import { getStoredProgress, saveStoredProgress } from '@/services';
-import { Send, ChevronRight, ChevronLeft, Loader2, RotateCcw, Clock, Home, Filter, Code2, Database, Network, ArrowRight, ArrowLeft, Sparkles, MessageCircle, CheckCircle, Mic, Trophy, SplitSquareHorizontal, Briefcase, Keyboard, Command, Brain, FilePlus, Trash2 } from 'lucide-react';
+import { Send, ChevronRight, ChevronLeft, Loader2, RotateCcw, Clock, Home, Code2, Database, Network, ArrowRight, ArrowLeft, Sparkles, MessageCircle, CheckCircle, Mic, Trophy, SplitSquareHorizontal, Keyboard, Brain, FilePlus } from 'lucide-react';
+import LoadingSpinner from './LoadingSpinner';
 
 interface CodingAppProps {
   onNavigateHome: () => void;
@@ -74,26 +76,18 @@ const CodingApp: React.FC<CodingAppProps> = ({ onNavigateHome }) => {
   // Filtering State
   const [difficultyFilter, setDifficultyFilter] = useState<'All' | 'Easy' | 'Medium' | 'Hard'>('All');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
-  const [companyFilter, setCompanyFilter] = useState<string>('All');
 
   // Derived State: Filtered Questions
   const filteredQuestions = useMemo(() => {
     return QUESTIONS.filter(q => {
       const matchesDiff = difficultyFilter === 'All' || q.difficulty === difficultyFilter;
       const matchesCat = categoryFilter === 'All' || q.category === categoryFilter;
-      const matchesComp = companyFilter === 'All' || (q.companies && q.companies.includes(companyFilter));
-      return matchesDiff && matchesCat && matchesComp;
+      return matchesDiff && matchesCat;
     });
-  }, [difficultyFilter, categoryFilter, companyFilter]);
+  }, [difficultyFilter, categoryFilter]);
 
   const categories = useMemo(() => {
     return Array.from(new Set(QUESTIONS.map(q => q.category))).sort();
-  }, []);
-
-  const companies = useMemo(() => {
-    const allCompanies = new Set<string>();
-    QUESTIONS.forEach(q => q.companies?.forEach(c => allCompanies.add(c)));
-    return Array.from(allCompanies).sort();
   }, []);
 
   // Current Question Logic
@@ -176,7 +170,7 @@ const CodingApp: React.FC<CodingAppProps> = ({ onNavigateHome }) => {
             setResult(savedData.analysisResult);
           }
         } catch (error) {
-          console.error("Error loading progress:", error);
+          logger.error("Error loading progress:", error);
         } finally {
           setIsLoadingProgress(false);
         }
@@ -303,7 +297,7 @@ const CodingApp: React.FC<CodingAppProps> = ({ onNavigateHome }) => {
         setIsFlipped(true);
       }
 
-    } catch (e) {
+    } catch {
       setError("Failed to analyze solution. Please check your API key or internet connection.");
     } finally {
       setIsAnalyzing(false);
@@ -322,7 +316,7 @@ const CodingApp: React.FC<CodingAppProps> = ({ onNavigateHome }) => {
         if (!customQuestion) {
           await saveStoredProgress(currentQuestion.id, { explanation: text });
         }
-      } catch (e) {
+      } catch {
         setExplanationText("Failed to generate explanation.");
       } finally {
         setExplanationLoading(false);
@@ -351,7 +345,7 @@ const CodingApp: React.FC<CodingAppProps> = ({ onNavigateHome }) => {
       if (!customQuestion) {
         await saveStoredProgress(currentQuestion.id, { chatHistory: finalHistory });
       }
-    } catch (e) {
+    } catch {
       setChatHistory(prev => [...prev, { role: 'model', text: "Sorry, I encountered an error." }]);
     } finally {
       setChatLoading(false);
@@ -414,7 +408,7 @@ const CodingApp: React.FC<CodingAppProps> = ({ onNavigateHome }) => {
         });
       })
       .catch(e => {
-        console.error("Failed to generate custom solution", e);
+        logger.error("Failed to generate custom solution", e);
         setCustomQuestion(prev => {
           if (prev && prev.id === tempId) {
             return { ...prev, officialSolution: "Failed to generate solution. You can still use the AI tutor for help." };
@@ -844,10 +838,7 @@ const CodingApp: React.FC<CodingAppProps> = ({ onNavigateHome }) => {
         className="max-w-2xl"
       >
         {explanationLoading ? (
-          <div className="flex flex-col items-center justify-center py-12">
-            <Loader2 className="animate-spin mb-4" size={32} />
-            <p className="font-mono text-sm text-gray-500">DECRYPTING_LOGIC...</p>
-          </div>
+          <LoadingSpinner message="DECRYPTING_LOGIC..." size="md" className="py-12" />
         ) : (
           <div className="prose prose-sm max-w-none font-mono">
             <ReactMarkdown>{explanationText}</ReactMarkdown>

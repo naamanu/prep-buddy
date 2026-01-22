@@ -1,9 +1,13 @@
-
-import React, { useEffect, useRef, useState } from 'react';
-import { X, Mic, MicOff, Loader2, Radio, Minus, Maximize2, Square } from 'lucide-react';
-import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { GoogleGenAI, type LiveServerMessage, Modality, type Session } from '@google/genai';
 import type { Question } from '@/types';
 import { base64ToUint8Array, arrayBufferToBase64, float32ToInt16, decodeAudioData } from '@/services/audioUtils';
+import { logger } from '@/utils/logger';
+import { GEMINI_LIVE_AUDIO_MODEL } from '@/config/models';
+import InterviewWindowHeader from './InterviewWindowHeader';
+import AudioVisualizerScreen from './AudioVisualizerScreen';
+import InterviewControls from './InterviewControls';
+import MinimizedInterviewBar from './MinimizedInterviewBar';
 
 interface LiveInterviewPanelProps {
   isOpen: boolean;
@@ -29,7 +33,7 @@ const LiveInterviewPanel: React.FC<LiveInterviewPanelProps> = ({
 
   // Refs
   const activeRef = useRef(false);
-  const sessionRef = useRef<any>(null);
+  const sessionRef = useRef<Promise<Session> | null>(null);
   const inputContextRef = useRef<AudioContext | null>(null);
   const outputContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -38,16 +42,34 @@ const LiveInterviewPanel: React.FC<LiveInterviewPanelProps> = ({
   const nextStartTimeRef = useRef<number>(0);
   const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
-  useEffect(() => {
-    if (isOpen) {
-      startSession();
-    } else {
-      stopSession();
-    }
-    return () => stopSession();
-  }, [isOpen]);
+  // Stable random values for visualizer bars (lazy init runs once)
+  const [aiSpeakingBarHeights] = useState(() =>
+    [...Array(5)].map(() => Math.random() * 100)
+  );
+  const [volumeBarFactors] = useState(() =>
+    [...Array(10)].map(() => Math.random())
+  );
 
-  const startSession = async () => {
+  const stopSession = useCallback(() => {
+    activeRef.current = false;
+    if (sessionRef.current) {
+      sessionRef.current.then((session) => { try { session.close(); } catch (e) { logger.debug('Session close failed:', e); } }).catch(() => { });
+      sessionRef.current = null;
+    }
+    audioSourcesRef.current.forEach(s => { try { s.stop(); } catch (e) { logger.debug('Audio source stop failed:', e); } });
+    audioSourcesRef.current.clear();
+    if (processorRef.current) { try { processorRef.current.disconnect(); } catch (e) { logger.debug('Processor disconnect failed:', e); } processorRef.current = null; }
+    if (sourceRef.current) { try { sourceRef.current.disconnect(); } catch (e) { logger.debug('Source disconnect failed:', e); } sourceRef.current = null; }
+    if (streamRef.current) { streamRef.current.getTracks().forEach(track => track.stop()); streamRef.current = null; }
+    if (inputContextRef.current) { try { inputContextRef.current.close(); } catch (e) { logger.debug('Input context close failed:', e); } inputContextRef.current = null; }
+    if (outputContextRef.current) { try { outputContextRef.current.close(); } catch (e) { logger.debug('Output context close failed:', e); } outputContextRef.current = null; }
+    setIsConnected(false);
+    setVolumeLevel(0);
+    setAiSpeaking(false);
+    nextStartTimeRef.current = 0;
+  }, []);
+
+  const startSession = useCallback(async () => {
     if (activeRef.current) return;
 
     try {
@@ -89,7 +111,7 @@ const LiveInterviewPanel: React.FC<LiveInterviewPanelProps> = ({
       `;
 
       const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        model: GEMINI_LIVE_AUDIO_MODEL,
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: mode === 'system-design' ? systemDesignInstruction : codingInstruction,
@@ -100,7 +122,7 @@ const LiveInterviewPanel: React.FC<LiveInterviewPanelProps> = ({
         callbacks: {
           onopen: () => {
             if (!activeRef.current) return;
-            console.log('Gemini Live Session Connected');
+            logger.log('Gemini Live Session Connected');
             setIsConnected(true);
 
             try {
@@ -131,7 +153,7 @@ const LiveInterviewPanel: React.FC<LiveInterviewPanelProps> = ({
               sourceRef.current = source;
               processorRef.current = processor;
             } catch (setupError) {
-              console.error("Audio setup failed", setupError);
+              logger.error("Audio setup failed", setupError);
             }
           },
           onmessage: async (message: LiveServerMessage) => {
@@ -159,11 +181,11 @@ const LiveInterviewPanel: React.FC<LiveInterviewPanelProps> = ({
                   }
                 };
               } catch (decodeErr) {
-                console.error("Audio decoding error", decodeErr);
+                logger.error("Audio decoding error", decodeErr);
               }
             }
             if (message.serverContent?.interrupted) {
-              audioSourcesRef.current.forEach(s => { try { s.stop(); } catch (e) { } });
+              audioSourcesRef.current.forEach(s => { try { s.stop(); } catch (e) { logger.debug('Audio source stop failed:', e); } });
               audioSourcesRef.current.clear();
               nextStartTimeRef.current = 0;
               setAiSpeaking(false);
@@ -173,7 +195,7 @@ const LiveInterviewPanel: React.FC<LiveInterviewPanelProps> = ({
             if (!activeRef.current) return;
             setIsConnected(false);
           },
-          onerror: (err) => {
+          onerror: () => {
             if (!activeRef.current) return;
             setError("Network error.");
             setIsConnected(false);
@@ -185,127 +207,69 @@ const LiveInterviewPanel: React.FC<LiveInterviewPanelProps> = ({
       if (!activeRef.current) return;
       setError(err.message || "Connection Failed.");
     }
-  };
+  }, [question, isMicOn, mode]);
 
-  const stopSession = () => {
-    activeRef.current = false;
-    if (sessionRef.current) {
-      sessionRef.current.then((session: any) => { try { session.close(); } catch (e) { } }).catch(() => { });
-      sessionRef.current = null;
+  useEffect(() => {
+    if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- connecting to external service on prop change
+      startSession();
+    } else {
+      stopSession();
     }
-    audioSourcesRef.current.forEach(s => { try { s.stop(); } catch (e) { } });
-    audioSourcesRef.current.clear();
-    if (processorRef.current) { try { processorRef.current.disconnect(); } catch (e) { } processorRef.current = null; }
-    if (sourceRef.current) { try { sourceRef.current.disconnect(); } catch (e) { } sourceRef.current = null; }
-    if (streamRef.current) { streamRef.current.getTracks().forEach(track => track.stop()); streamRef.current = null; }
-    if (inputContextRef.current) { try { inputContextRef.current.close(); } catch (e) { } inputContextRef.current = null; }
-    if (outputContextRef.current) { try { outputContextRef.current.close(); } catch (e) { } outputContextRef.current = null; }
-    setIsConnected(false);
-    setVolumeLevel(0);
-    setAiSpeaking(false);
-    nextStartTimeRef.current = 0;
-  };
+    return () => stopSession();
+  }, [isOpen, startSession, stopSession]);
 
   if (!isOpen) return null;
 
   // MINIMIZED
   if (isMinimized) {
     return (
-      <div className="fixed bottom-6 right-6 z-50">
-        <div className="bg-white border-2 border-black shadow-retro flex items-center p-2 gap-3">
-          <div className={`w-3 h-3 rounded-full border border-black ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-          <span className="font-mono text-xs font-bold text-black uppercase">LIVE_SESSION</span>
-          <span className="font-mono text-xs bg-black text-white px-2">{timerDisplay}</span>
-          <button onClick={() => setIsMinimized(false)} className="p-1 hover:bg-gray-200 border border-transparent hover:border-black"><Maximize2 size={12} /></button>
-        </div>
-      </div>
+      <MinimizedInterviewBar
+        isConnected={isConnected}
+        onMaximize={() => setIsMinimized(false)}
+        statusLabel="LIVE_SESSION"
+        timerDisplay={timerDisplay}
+      />
     );
   }
 
   // MAXIMIZED
+  const handleRetry = () => {
+    stopSession();
+    startSession();
+  };
+
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col w-80 bg-[#f0f0f0] border-2 border-black shadow-retro">
-      {/* Window Header */}
-      <div className="bg-black text-white px-2 py-1 flex justify-between items-center border-b-2 border-black">
-        <span className="font-mono text-xs font-bold uppercase">Voice_Link v1.0</span>
-        <div className="flex gap-1">
-          <button onClick={() => setIsMinimized(true)} className="bg-white text-black w-4 h-4 flex items-center justify-center border border-gray-500 hover:bg-gray-200"><Minus size={10} /></button>
-          <button onClick={onClose} className="bg-white text-black w-4 h-4 flex items-center justify-center border border-gray-500 hover:bg-red-500 hover:text-white"><X size={10} /></button>
-        </div>
-      </div>
-
-      {/* Visualizer Screen */}
-      <div className="h-40 bg-black border-b-2 border-black relative flex items-center justify-center overflow-hidden">
-        {/* Scanlines */}
-        <div className="absolute inset-0 pointer-events-none opacity-10" style={{ backgroundImage: 'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06))', backgroundSize: '100% 2px, 3px 100%' }}></div>
-
-        {!isConnected && !error && (
-          <div className="flex flex-col items-center gap-2 text-green-500 font-mono">
-            <Loader2 className="animate-spin" size={24} />
-            <span className="text-xs uppercase">Est_Connection...</span>
-          </div>
-        )}
-
-        {error && (
-          <div className="text-red-500 font-mono text-xs text-center px-4">
-            <span className="block mb-2">CONN_ERR: {error}</span>
-            <button onClick={() => { stopSession(); startSession(); }} className="border border-red-500 px-2 py-1 hover:bg-red-900">RETRY</button>
-          </div>
-        )}
-
-        {isConnected && (
-          <div className="w-full h-full flex items-center justify-center">
-            {aiSpeaking ? (
-              <div className="flex gap-1 h-12 items-center">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="w-2 bg-green-500 animate-pulse" style={{ height: `${Math.random() * 100}%` }}></div>
-                ))}
-              </div>
-            ) : (
-              <div className="w-24 h-24 border border-green-500/30 rounded-full flex items-center justify-center animate-pulse">
-                <div className="w-20 h-20 border border-green-500/50 rounded-full"></div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Status Bar */}
-        <div className="absolute bottom-0 left-0 right-0 bg-black border-t border-gray-800 px-2 py-1 flex justify-between items-center">
-          <span className="text-[10px] text-green-500 font-mono uppercase">{aiSpeaking ? "INCOMING_AUDIO" : "LISTENING..."}</span>
-          {isConnected && isMicOn && (
-            <div className="flex gap-0.5 h-2 items-end">
-              {[...Array(10)].map((_, i) => (
-                <div key={i} className="w-1 bg-green-500" style={{ height: `${Math.max(10, Math.min(100, volumeLevel * 100 * Math.random()))}%`, opacity: volumeLevel > 0.01 ? 1 : 0.3 }} />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Controls */}
-      <div className="p-3 bg-[#d4d4d4]">
-        <div className="flex justify-between items-center mb-3 bg-white border-2 border-black px-2 py-1 shadow-retro-sm">
-          <span className="font-mono text-xs font-bold">TIMER:</span>
-          <span className="font-mono text-xs font-bold">{timerDisplay}</span>
-        </div>
-
-        <div className="flex justify-center gap-4">
-          <button
-            onClick={() => setIsMicOn(!isMicOn)}
-            disabled={!isConnected}
-            className={`w-10 h-10 flex items-center justify-center border-2 border-black shadow-retro-sm transition-all active:shadow-none active:translate-x-[2px] active:translate-y-[2px] ${isMicOn ? 'bg-white hover:bg-gray-100' : 'bg-red-500 text-white'
-              }`}
-          >
-            {isMicOn ? <Mic size={18} /> : <MicOff size={18} />}
-          </button>
-          <button
-            onClick={onClose}
-            className="flex-1 bg-black text-white font-mono font-bold text-xs border-2 border-black hover:bg-gray-800 active:bg-gray-900 shadow-retro-sm active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
-          >
-            TERMINATE
-          </button>
-        </div>
-      </div>
+      <InterviewWindowHeader
+        title="Voice_Link v1.0"
+        onMinimize={() => setIsMinimized(true)}
+        onClose={onClose}
+      />
+      <AudioVisualizerScreen
+        isConnected={isConnected}
+        error={error}
+        aiSpeaking={aiSpeaking}
+        isMicOn={isMicOn}
+        volumeLevel={volumeLevel}
+        onRetry={handleRetry}
+        heightClass="h-40"
+        connectingText="Est_Connection..."
+        speakingText="INCOMING_AUDIO"
+        errorPrefix="CONN_ERR: "
+        aiSpeakingBarHeights={aiSpeakingBarHeights}
+        volumeBarFactors={volumeBarFactors}
+        circleSize="lg"
+      />
+      <InterviewControls
+        isMicOn={isMicOn}
+        isConnected={isConnected}
+        onToggleMic={() => setIsMicOn(!isMicOn)}
+        onEndInterview={onClose}
+        endButtonText="TERMINATE"
+        timerDisplay={timerDisplay}
+        buttonGap="lg"
+      />
     </div>
   );
 };

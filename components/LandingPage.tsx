@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Code2, Server, ArrowRight, Brain, Sparkles, Terminal, Cpu, BookOpen, Loader2, Search } from 'lucide-react';
+import { Code2, Server, ArrowRight, Sparkles, Terminal, Cpu, BookOpen, Loader2, Search, Mic } from 'lucide-react';
 import { identifyCodingPattern } from '@/services';
 import Tour from './Tour';
 
 interface LandingPageProps {
-  onNavigate: (page: 'coding' | 'system-design' | 'learning') => void;
+  onNavigate: (page: 'coding' | 'system-design' | 'learning' | 'mock-interview') => void;
 }
 
 // --- Dither / Genie Components ---
@@ -19,51 +19,6 @@ const DitherBackground = () => (
     }}
   />
 );
-
-const GenieOrb = () => {
-  return (
-    <div className="relative w-64 h-64 md:w-80 md:h-80 mx-auto mb-8 flex items-center justify-center">
-      {/* SVG Filter for the liquid/dither effect */}
-      <svg className="absolute w-0 h-0">
-        <defs>
-          <filter id="pixelate-dither">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur" />
-            <feColorMatrix
-              in="blur"
-              type="matrix"
-              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 19 -9"
-              result="goo"
-            />
-            <feComposite in="SourceGraphic" in2="goo" operator="atop" />
-          </filter>
-        </defs>
-      </svg>
-
-      {/* Animated Blobs */}
-      <div
-        className="absolute inset-0 animate-spin-slow opacity-80"
-        style={{ filter: 'url(#pixelate-dither)' }}
-      >
-        <div className="absolute top-10 left-10 w-32 h-32 bg-black rounded-full mix-blend-multiply filter blur-xl animate-blob"></div>
-        <div className="absolute top-10 right-10 w-32 h-32 bg-gray-600 rounded-full mix-blend-multiply filter blur-xl animate-blob animation-delay-2000"></div>
-        <div className="absolute -bottom-8 left-20 w-40 h-40 bg-gray-800 rounded-full mix-blend-multiply filter blur-xl animate-blob animation-delay-4000"></div>
-      </div>
-
-      {/* Center Icon */}
-      <div className="relative z-10 bg-white border-2 border-black rounded-full p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-        <Brain size={64} className="text-black" />
-      </div>
-
-      {/* Decorative Elements */}
-      <div className="absolute top-0 right-10">
-        <Sparkles size={24} className="text-black animate-pulse" />
-      </div>
-      <div className="absolute bottom-10 left-0">
-        <Sparkles size={16} className="text-gray-500 animate-bounce" />
-      </div>
-    </div>
-  );
-};
 
 const RetroCard = ({
   id,
@@ -122,7 +77,7 @@ const PatternRecognizer = () => {
     try {
       const analysis = await identifyCodingPattern(input);
       setResult(analysis);
-    } catch (e) {
+    } catch {
       setResult("Unable to analyze pattern. Please try again.");
     } finally {
       setLoading(false);
@@ -207,6 +162,11 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
       targetId: 'tour-learning',
       title: 'Knowledge Base',
       content: 'Access a library of flashcards or generate custom learning modules for any Computer Science topic you want to master.'
+    },
+    {
+      targetId: 'tour-interview',
+      title: 'Mock Interview',
+      content: 'Upload your resume and practice with an AI interviewer. Choose your interviewer persona and get personalized feedback on your performance.'
     }
   ];
 
@@ -310,6 +270,16 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             icon={BookOpen}
             onClick={() => onNavigate('learning')}
             accentColor="bg-orange-50"
+          />
+
+          <RetroCard
+            id="tour-interview"
+            title="Mock Interview"
+            label="Module 04"
+            description="Upload your resume and practice with an AI interviewer. Get personalized feedback."
+            icon={Mic}
+            onClick={() => onNavigate('mock-interview')}
+            accentColor="bg-green-50"
           />
 
         </div>

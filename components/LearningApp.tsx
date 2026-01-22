@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import CodeEditor from 'react-simple-code-editor';
+import { logger } from '@/utils/logger';
 import Prism from 'prismjs';
 import { generateLearningModule, chatWithLearningTutor } from '@/services';
 import type { ChatMessage } from '@/types';
@@ -81,7 +82,7 @@ const LearningApp: React.FC<LearningAppProps> = ({ onNavigateHome }) => {
       const plan = await generateLearningModule(topic);
       setLearningPlan(plan);
     } catch (e) {
-      console.error(e);
+      logger.error(e);
     } finally {
       setIsLoading(false);
     }
@@ -100,7 +101,7 @@ const LearningApp: React.FC<LearningAppProps> = ({ onNavigateHome }) => {
     try {
       const response = await chatWithLearningTutor(newHistory, userMsg.text, topic);
       setChatHistory([...newHistory, { role: 'model', text: response }]);
-    } catch (e) {
+    } catch {
       setChatHistory([...newHistory, { role: 'model', text: "Error connecting to tutor." }]);
     } finally {
       setChatLoading(false);
