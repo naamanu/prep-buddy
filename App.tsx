@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import LandingPage from '@/components/LandingPage';
 import CodingApp from '@/components/CodingApp';
 import SystemDesignApp from '@/components/SystemDesignApp';
 import LearningApp from '@/components/LearningApp';
+import MockInterviewApp from '@/components/MockInterviewApp';
 import { BootSequence } from '@/components/BootSequence';
 import Scanlines from '@/components/Scanlines';
 
-type ViewState = 'landing' | 'coding' | 'system-design' | 'learning';
+type ViewState = 'landing' | 'coding' | 'system-design' | 'learning' | 'mock-interview';
 
 const AppContent: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>('landing');
@@ -30,20 +31,16 @@ const AppContent: React.FC = () => {
       {currentView === 'learning' && (
         <LearningApp onNavigateHome={() => setCurrentView('landing')} />
       )}
+      {currentView === 'mock-interview' && (
+        <MockInterviewApp onNavigateHome={() => setCurrentView('landing')} />
+      )}
     </>
   );
 };
 
 const App: React.FC = () => {
-  const [booting, setBooting] = useState(true);
-
-  // Only boot on first load
-  useEffect(() => {
-    const hasBooted = sessionStorage.getItem('pb_booted');
-    if (hasBooted) {
-      setBooting(false);
-    }
-  }, []);
+  // Initialize booting state based on sessionStorage (lazy initialization avoids effect)
+  const [booting, setBooting] = useState(() => !sessionStorage.getItem('pb_booted'));
 
   const handleBootComplete = () => {
     setBooting(false);
